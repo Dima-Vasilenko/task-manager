@@ -1,21 +1,23 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
-	"maps"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/Dima-Vasilenko/task-manager/internal/domain"
+	"github.com/Dima-Vasilenko/task-manager/internal/repository"
 )
 
 type CreateTaskRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Importance  int    `json:"importance"`
-	Completed   bool   `json:"completed"`
 }
 
 type UpdateTaskRequest struct {
@@ -26,73 +28,46 @@ type UpdateTaskRequest struct {
 }
 
 type Application struct {
-	tasks  map[int]domain.Task
-	nextID int
-	mu     sync.RWMutex
+	tasks *repository.TaskRepository
 }
 
-func (a *Application) GetTasks() map[int]domain.Task {
-	return a.tasks
-}
-
-func NewApplication() *Application {
-	t := domain.CreateTasks()
+func NewApplication(db *sql.DB) *Application {
 	return &Application{
-		tasks:  t,
-		nextID: len(t) + 1,
+		tasks: repository.NewTaskRepository(db),
 	}
 }
 
-func (a *Application) addTask(taskReq CreateTaskRequest) (task domain.Task) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	task.Title = taskReq.Title
-	task.Description = taskReq.Description
-	task.Importance = taskReq.Importance
-	task.ID = a.nextID
-	a.nextID++
-	a.tasks[task.ID] = task
-	return
+func (a *Application) addTask(ctx context.Context, taskReq CreateTaskRequest) (domain.Task, error) {
+	task, err := a.tasks.CreateTask(ctx, domain.CreateTaskParams{
+		Title:       taskReq.Title,
+		Description: taskReq.Description,
+		Importance:  taskReq.Importance,
+	})
+	if err != nil {
+		return domain.Task{}, err
+	}
+	return task, nil
 }
 
-func (a *Application) updateTask(id int, taskReq UpdateTaskRequest) (domain.Task, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	task, ok := a.tasks[id]
-	if !ok {
-		return domain.Task{}, false
+func (a *Application) updateTask(ctx context.Context, id int64, taskReq UpdateTaskRequest) (domain.Task, error) {
+	task, err := a.tasks.UpdateTaskByID(ctx, id, domain.UpdateTaskParams{
+		Title:       taskReq.Title,
+		Description: taskReq.Description,
+		Importance:  taskReq.Importance,
+		Completed:   taskReq.Completed,
+	})
+	if err != nil {
+		return domain.Task{}, err
 	}
-
-	if taskReq.Title != nil {
-		task.Title = *taskReq.Title
-	}
-	if taskReq.Description != nil {
-		task.Description = *taskReq.Description
-	}
-	if taskReq.Completed != nil {
-		task.Completed = *taskReq.Completed
-	}
-	if taskReq.Importance != nil {
-		task.Importance = *taskReq.Importance
-	}
-
-	a.tasks[task.ID] = task
-	return task, true
+	return task, nil
 }
 
-func (a *Application) deleteTask(id int) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	_, ok := a.tasks[id]
-	if !ok {
-		return false
+func (a *Application) deleteTask(ctx context.Context, id int64) (bool, error) {
+	ok, err := a.tasks.DeleteTaskByID(ctx, id)
+	if err != nil {
+		return false, err
 	}
-
-	delete(a.tasks, id)
-	return true
+	return ok, nil
 }
 
 func (a *Application) writeJSON(w http.ResponseWriter, status int, data any) error {
@@ -102,10 +77,10 @@ func (a *Application) writeJSON(w http.ResponseWriter, status int, data any) err
 	}
 
 	js = append(js, '\n')
-	w.Header().Set("Content-Type", "Application/json")
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write([]byte(js))
-	return nil
+	_, errWrite := w.Write([]byte(js))
+	return errWrite
 }
 
 func (a *Application) AllHandler(w http.ResponseWriter, r *http.Request) {
@@ -113,18 +88,24 @@ func (a *Application) AllHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Application) TaskHandler(w http.ResponseWriter, r *http.Request) {
-	a.mu.RLock()
-	tasks := maps.Clone(a.tasks)
-	a.mu.RUnlock()
-
-	err := a.writeJSON(w, http.StatusOK, tasks)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	tasks, err := a.tasks.GetAll(ctx)
 	if err != nil {
+		http.Error(w, "Internal Server error", http.StatusInternalServerError)
+		return
+	}
+	errWrite := a.writeJSON(w, http.StatusOK, tasks)
+	if errWrite != nil {
 		http.Error(w, "Internal Server error", http.StatusInternalServerError)
 		return
 	}
 }
 
 func (a *Application) CreateTaskHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
 	var taskReq CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&taskReq); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -135,7 +116,11 @@ func (a *Application) CreateTaskHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
-	task := a.addTask(taskReq)
+	task, errCreate := a.addTask(ctx, taskReq)
+	if errCreate != nil {
+		http.Error(w, "Internal Server error", http.StatusInternalServerError)
+		return
+	}
 
 	err := a.writeJSON(w, http.StatusCreated, task)
 	if err != nil {
@@ -145,17 +130,23 @@ func (a *Application) CreateTaskHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *Application) TaskByIDHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		http.Error(w, "invalid task id", http.StatusBadRequest)
 		return
 	}
 
-	a.mu.RLock()
-	task, ok := a.tasks[id]
-	a.mu.RUnlock()
-	if !ok {
+	task, errTake := a.tasks.GetTaskByID(ctx, id)
+	if errors.Is(errTake, repository.ErrTaskNotFound) {
 		http.Error(w, "id not found", http.StatusNotFound)
+		return
+	}
+
+	if errTake != nil {
+		http.Error(w, "Internal Server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -167,8 +158,10 @@ func (a *Application) TaskByIDHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Application) UpdateTaskHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 
-	id, err := strconv.Atoi(r.PathValue("id"))
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		http.Error(w, "invalid task id", http.StatusBadRequest)
 		return
@@ -195,9 +188,14 @@ func (a *Application) UpdateTaskHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	task, ok := a.updateTask(id, taskReq)
-	if !ok {
+	task, errUpdate := a.updateTask(ctx, id, taskReq)
+	if errors.Is(errUpdate, repository.ErrTaskNotFound) {
 		http.Error(w, "id not found", http.StatusNotFound)
+		return
+	}
+
+	if errUpdate != nil {
+		http.Error(w, "Internal Server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -209,14 +207,22 @@ func (a *Application) UpdateTaskHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *Application) DeleteTaskHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 
-	id, err := strconv.Atoi(r.PathValue("id"))
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		http.Error(w, "invalid task id", http.StatusBadRequest)
 		return
 	}
 
-	if ok := a.deleteTask(id); !ok {
+	ok, err := a.deleteTask(ctx, id)
+	if err != nil {
+		http.Error(w, "Internal Server error", http.StatusInternalServerError)
+		return
+	}
+
+	if !ok {
 		http.Error(w, "id not found", http.StatusNotFound)
 		return
 	}

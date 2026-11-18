@@ -3,18 +3,31 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log"
+	"os/signal"
+	"syscall"
 
 	"net/http"
 	"time"
 
+	"github.com/Dima-Vasilenko/task-manager/internal/config"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	connString := "postgres://task_manager_app:t1a2s3k4@localhost:5432/task_manager"
+	if err := godotenv.Load(); err != nil {
+		log.Println("Файл .env не найден, используем системные переменные")
+	}
 
-	db, err := sql.Open("pgx", connString)
+	config, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db, err := sql.Open("pgx", config.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,19 +42,34 @@ func main() {
 
 	log.Println("Successfully connected to PostgreSQL")
 
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
+
 	app := NewApplication(db)
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	srv := &http.Server{
-		Addr:              ":8080",
-		Handler:           app.Route(),
-		IdleTimeout:       time.Minute,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
+		Addr:    fmt.Sprintf(":%v", config.Port),
+		Handler: app.Route(),
 	}
 
-	err2 := srv.ListenAndServe()
-	if err2 != nil {
-		log.Fatal(err2)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdown); err != nil {
+		log.Printf("error with shotdown: %v", err)
 	}
+
+	log.Println("server stopped")
 }

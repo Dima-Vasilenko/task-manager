@@ -15,6 +15,7 @@ type CreateTaskRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Importance  int    `json:"importance"`
+	Completed   bool   `json:"completed"`
 }
 
 type UpdateTaskRequest struct {
@@ -24,13 +25,25 @@ type UpdateTaskRequest struct {
 	Importance  *int    `json:"importance"`
 }
 
-type application struct {
+type Application struct {
 	tasks  map[int]domain.Task
 	nextID int
 	mu     sync.RWMutex
 }
 
-func (a *application) addTask(taskReq CreateTaskRequest) (task domain.Task) {
+func (a *Application) GetTasks() map[int]domain.Task {
+	return a.tasks
+}
+
+func NewApplication() *Application {
+	t := domain.CreateTasks()
+	return &Application{
+		tasks:  t,
+		nextID: len(t) + 1,
+	}
+}
+
+func (a *Application) addTask(taskReq CreateTaskRequest) (task domain.Task) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -43,7 +56,7 @@ func (a *application) addTask(taskReq CreateTaskRequest) (task domain.Task) {
 	return
 }
 
-func (a *application) updateTask(id int, taskReq UpdateTaskRequest) (domain.Task, bool) {
+func (a *Application) updateTask(id int, taskReq UpdateTaskRequest) (domain.Task, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -69,7 +82,7 @@ func (a *application) updateTask(id int, taskReq UpdateTaskRequest) (domain.Task
 	return task, true
 }
 
-func (a *application) deleteTask(id int) bool {
+func (a *Application) deleteTask(id int) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -82,24 +95,24 @@ func (a *application) deleteTask(id int) bool {
 	return true
 }
 
-func (a *application) writeJSON(w http.ResponseWriter, status int, data any) error {
+func (a *Application) writeJSON(w http.ResponseWriter, status int, data any) error {
 	js, err := json.MarshalIndent(data, "", "\t")
 	if err != nil {
 		return err
 	}
 
 	js = append(js, '\n')
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "Application/json")
 	w.WriteHeader(status)
 	w.Write([]byte(js))
 	return nil
 }
 
-func (a *application) allHandler(w http.ResponseWriter, r *http.Request) {
+func (a *Application) AllHandler(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func (a *application) taskHandler(w http.ResponseWriter, r *http.Request) {
+func (a *Application) TaskHandler(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	tasks := maps.Clone(a.tasks)
 	a.mu.RUnlock()
@@ -111,7 +124,7 @@ func (a *application) taskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *application) createTaskHandler(w http.ResponseWriter, r *http.Request) {
+func (a *Application) CreateTaskHandler(w http.ResponseWriter, r *http.Request) {
 	var taskReq CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&taskReq); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -131,8 +144,7 @@ func (a *application) createTaskHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (a *application) taskByIDHandler(w http.ResponseWriter, r *http.Request) {
-
+func (a *Application) TaskByIDHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id <= 0 {
 		http.Error(w, "invalid task id", http.StatusBadRequest)
@@ -154,7 +166,7 @@ func (a *application) taskByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *application) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
+func (a *Application) UpdateTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id <= 0 {
@@ -169,7 +181,7 @@ func (a *application) updateTaskHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if taskReq.Title == nil && taskReq.Description == nil && taskReq.Importance == nil && taskReq.Completed == nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		http.Error(w, "Bad request ", http.StatusBadRequest)
 		return
 	}
 
@@ -196,7 +208,7 @@ func (a *application) updateTaskHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (a *application) deleteTaskHandler(w http.ResponseWriter, r *http.Request) {
+func (a *Application) DeleteTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id <= 0 {
@@ -212,7 +224,7 @@ func (a *application) deleteTaskHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *application) healthHandler(w http.ResponseWriter, r *http.Request) {
+func (a *Application) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	data := map[string]string{
 		"status": "ok",
 	}
@@ -224,17 +236,17 @@ func (a *application) healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *application) route() *http.ServeMux {
+func (a *Application) Route() *http.ServeMux {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", a.allHandler)
-	mux.HandleFunc("GET /tasks", a.taskHandler)
-	mux.HandleFunc("POST /tasks", a.createTaskHandler)
-	mux.HandleFunc("GET /tasks/{id}", a.taskByIDHandler)
-	mux.HandleFunc("PATCH /tasks/{id}", a.updateTaskHandler)
-	mux.HandleFunc("DELETE /tasks/{id}", a.deleteTaskHandler)
-	mux.HandleFunc("GET /health", a.healthHandler)
+	mux.HandleFunc("/", a.AllHandler)
+	mux.HandleFunc("GET /tasks", a.TaskHandler)
+	mux.HandleFunc("POST /tasks", a.CreateTaskHandler)
+	mux.HandleFunc("GET /tasks/{id}", a.TaskByIDHandler)
+	mux.HandleFunc("PATCH /tasks/{id}", a.UpdateTaskHandler)
+	mux.HandleFunc("DELETE /tasks/{id}", a.DeleteTaskHandler)
+	mux.HandleFunc("GET /health", a.HealthHandler)
 
 	return mux
 }

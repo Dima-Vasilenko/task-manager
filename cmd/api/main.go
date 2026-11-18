@@ -4,20 +4,14 @@ import (
 	"log"
 	"net/http"
 	"time"
-
-	"github.com/Dima-Vasilenko/task-manager/internal/domain"
 )
 
 func main() {
-	t := domain.CreateTasks()
-	app := application{
-		tasks:  t,
-		nextID: len(t) + 1,
-	}
+	app := NewApplication()
 
 	srv := &http.Server{
 		Addr:              ":8080",
-		Handler:           app.route(),
+		Handler:           app.Route(),
 		IdleTimeout:       time.Minute,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,

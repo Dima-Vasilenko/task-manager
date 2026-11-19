@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Dima-Vasilenko/task-manager/internal/app"
 	"github.com/Dima-Vasilenko/task-manager/internal/config"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
@@ -47,7 +48,7 @@ func main() {
 	db.SetConnMaxLifetime(5 * time.Minute)
 	db.SetConnMaxIdleTime(2 * time.Minute)
 
-	app := NewApplication(db)
+	app := app.NewApplication(db)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

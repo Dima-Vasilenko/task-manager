@@ -20,18 +20,3 @@ type UpdateTaskParams struct {
 	Completed   *bool
 	Importance  *int
 }
-
-// func CreateTasks() map[int]Task {
-// 	tasks := make(map[int]Task, 10)
-// 	var i int64
-// 	for i = 1; i <= 5; i++ {
-// 		tasks[i] = Task{
-// 			ID:          i,
-// 			Title:       "task" + strconv.Itoa(i),
-// 			Description: "about " + strconv.Itoa(i) + " task",
-// 			Completed:   false,
-// 			Importance:  10 - i,
-// 		}
-// 	}
-// 	return tasks
-// }

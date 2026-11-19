@@ -8,7 +8,10 @@ import (
 	"github.com/Dima-Vasilenko/task-manager/internal/domain"
 )
 
-var ErrTaskNotFound = errors.New("task not found")
+var (
+	ErrTaskNotFound    = errors.New("task not found")
+	ErrNothingToDelete = errors.New("don't delete anything")
+)
 
 type TaskRepository struct {
 	db *sql.DB
@@ -80,17 +83,20 @@ func (t *TaskRepository) UpdateTaskByID(ctx context.Context, id int64, upTask do
 	return task, nil
 }
 
-func (t *TaskRepository) DeleteTaskByID(ctx context.Context, id int64) (bool, error) {
+func (t *TaskRepository) DeleteTaskByID(ctx context.Context, id int64) error {
 	query := "DELETE FROM app.tasks WHERE id = $1"
 	res, err := t.db.ExecContext(ctx, query, id)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	amount, err := res.RowsAffected()
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	return amount > 0, nil
+	if amount <= 0 {
+		return ErrNothingToDelete
+	}
+	return nil
 }

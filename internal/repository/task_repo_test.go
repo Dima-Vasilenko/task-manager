@@ -41,7 +41,7 @@ func setUpTestDB(t *testing.T) *sql.DB {
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		t.Errorf("no connection sets %v", err)
+		t.Fatalf("no connection sets %v", err)
 	}
 
 	_, errClear := db.ExecContext(ctx, "TRUNCATE TABLE app.tasks RESTART IDENTITY CASCADE")
@@ -186,7 +186,10 @@ func TestUpdateTask(t *testing.T) {
 	req := domain.CreateTaskParams{Title: "New task", Description: "New description", Importance: 5}
 	reqUp := domain.UpdateTaskParams{Completed: &completence}
 
-	task, _ := repo.CreateTask(ctx, req)
+	task, err := repo.CreateTask(ctx, req)
+	if err != nil {
+		t.Errorf("failde to create task: %v", err)
+	}
 
 	upgradedTask, err := repo.UpdateTaskByID(ctx, task.ID, reqUp)
 	if err != nil {
@@ -227,7 +230,10 @@ func TestUpdateCompletedFalse(t *testing.T) {
 	reqUp := domain.UpdateTaskParams{Completed: &completence1}
 	reqUp2 := domain.UpdateTaskParams{Completed: &completence2}
 
-	task, _ := repo.CreateTask(ctx, req)
+	task, err := repo.CreateTask(ctx, req)
+	if err != nil {
+		t.Errorf("failde to create task: %v", err)
+	}
 
 	upgradedTask, err := repo.UpdateTaskByID(ctx, task.ID, reqUp)
 	if err != nil {
@@ -244,7 +250,7 @@ func TestUpdateCompletedFalse(t *testing.T) {
 	}
 
 	if upgradedTask2.Completed != false {
-		t.Errorf("get: %v, expect: %v", upgradedTask.Completed, completence2)
+		t.Errorf("get: %v, expect: %v", upgradedTask2.Completed, completence2)
 	}
 }
 
@@ -262,7 +268,10 @@ func TestUpdateMultipleFields(t *testing.T) {
 	req := domain.CreateTaskParams{Title: "New task", Description: "New description", Importance: 5}
 	reqUp := domain.UpdateTaskParams{Title: &title, Description: &description, Importance: &importance, Completed: &completence}
 
-	task, _ := repo.CreateTask(ctx, req)
+	task, err := repo.CreateTask(ctx, req)
+	if err != nil {
+		t.Errorf("failde to create task: %v", err)
+	}
 
 	upgradedTask, err := repo.UpdateTaskByID(ctx, task.ID, reqUp)
 	if err != nil {
@@ -315,23 +324,22 @@ func TestDeleteTask(t *testing.T) {
 
 	req := domain.CreateTaskParams{Title: "New task", Description: "New description", Importance: 5}
 
-	task, _ := repo.CreateTask(ctx, req)
-
-	ok, err := repo.DeleteTaskByID(ctx, task.ID)
+	task, err := repo.CreateTask(ctx, req)
 	if err != nil {
-		t.Fatalf("error in delliting task: %v", err)
+		t.Errorf("failde to create task: %v", err)
 	}
 
-	if !ok {
-		t.Errorf("get: %v, expect: %v", ok, true)
+	errDel := repo.DeleteTaskByID(ctx, task.ID)
+	if errors.Is(errDel, ErrNothingToDelete) {
+		t.Errorf("err in deliting: %v", errDel)
 	}
 
-	ok, err2 := repo.DeleteTaskByID(ctx, task.ID)
-	if err2 != nil {
-		t.Fatalf("error in delliting task: %v", err)
+	if errDel != nil {
+		t.Fatalf("error in delliting task: %v", errDel)
 	}
 
-	if ok {
-		t.Errorf("get: %v, expect: %v", ok, false)
+	err2 := repo.DeleteTaskByID(ctx, task.ID)
+	if !errors.Is(err2, ErrNothingToDelete) {
+		t.Errorf("expected such error: %v,  with deliting", err2)
 	}
 }

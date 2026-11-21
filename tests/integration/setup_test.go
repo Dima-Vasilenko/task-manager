@@ -56,7 +56,7 @@ func setUpTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func CreateTestTask(t *testing.T, route *http.ServeMux) domain.Task {
+func CreateTestTask(t *testing.T, route http.Handler) domain.Task {
 	t.Helper()
 	payload := handler.CreateTaskRequest{Title: "First Task", Description: "10 byn", Importance: 4}
 	body, mErr := json.Marshal(payload)
@@ -71,6 +71,10 @@ func CreateTestTask(t *testing.T, route *http.ServeMux) domain.Task {
 
 	if res.Code != http.StatusCreated {
 		t.Fatalf("status %v, required %v", res.Code, http.StatusCreated)
+	}
+
+	if res.Header().Get("X-Request-ID") == "" {
+		t.Fatalf("resuest_id is empty: %v", res.Header().Get("X-Request-ID"))
 	}
 
 	var task domain.Task

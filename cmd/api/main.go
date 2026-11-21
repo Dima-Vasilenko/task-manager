@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"os/signal"
 	"syscall"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Dima-Vasilenko/task-manager/internal/app"
 	"github.com/Dima-Vasilenko/task-manager/internal/config"
+	"github.com/Dima-Vasilenko/task-manager/internal/http/middleware"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 )
@@ -48,14 +50,15 @@ func main() {
 	db.SetConnMaxLifetime(5 * time.Minute)
 	db.SetConnMaxIdleTime(2 * time.Minute)
 
-	app := app.NewApplication(db)
+	logger := middleware.New(slog.LevelInfo)
+	app := app.NewApplication(db, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%v", config.Port),
-		Handler: app.Route(),
+		Handler: app.Handler(),
 	}
 
 	go func() {

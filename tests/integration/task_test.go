@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,13 +16,15 @@ import (
 	"github.com/Dima-Vasilenko/task-manager/internal/app"
 	"github.com/Dima-Vasilenko/task-manager/internal/domain"
 	"github.com/Dima-Vasilenko/task-manager/internal/handler"
+	"github.com/Dima-Vasilenko/task-manager/internal/http/middleware"
 )
 
 func TestCreateTask(t *testing.T) {
 	db := setUpTestDB(t)
-	app := app.NewApplication(db)
+	logger := middleware.New(slog.LevelInfo)
+	app := app.NewApplication(db, logger)
 
-	route := app.Route()
+	route := app.Handler()
 	task := CreateTestTask(t, route)
 	if task.ID <= 0 {
 		t.Errorf("Incorrect task ID:  %v", task.ID)
@@ -48,9 +51,10 @@ func TestCreateTask(t *testing.T) {
 
 func TestGetTaskByID(t *testing.T) {
 	db := setUpTestDB(t)
-	app := app.NewApplication(db)
+	logger := middleware.New(slog.LevelInfo)
+	app := app.NewApplication(db, logger)
 
-	route := app.Route()
+	route := app.Handler()
 	createdTask := CreateTestTask(t, route)
 
 	url := fmt.Sprintf("/tasks/%d", createdTask.ID)
@@ -88,9 +92,10 @@ func TestGetTaskByID(t *testing.T) {
 
 func TestUpdateTask(t *testing.T) {
 	db := setUpTestDB(t)
-	app := app.NewApplication(db)
+	logger := middleware.New(slog.LevelInfo)
+	app := app.NewApplication(db, logger)
 
-	route := app.Route()
+	route := app.Handler()
 	createdTask := CreateTestTask(t, route)
 
 	title := "New title"
@@ -151,9 +156,10 @@ func TestUpdateTask(t *testing.T) {
 
 func TestDeleteTask(t *testing.T) {
 	db := setUpTestDB(t)
-	app := app.NewApplication(db)
+	logger := middleware.New(slog.LevelInfo)
+	app := app.NewApplication(db, logger)
 
-	route := app.Route()
+	route := app.Handler()
 	createdTask := CreateTestTask(t, route)
 
 	url := fmt.Sprintf("/tasks/%d", createdTask.ID)

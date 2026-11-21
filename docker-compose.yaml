@@ -1,0 +1,66 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    container_name: task-manager-api
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      PORT: 8080
+      DATABASE_URL: ${DATABASE_URL_DOCKER}
+    
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+        
+
+  postgres:
+    image: postgres:16
+
+    container_name: task-manager-postgres
+
+    environment:
+      POSTGRES_USER: ${DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD}
+
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+      - ./init:/docker-entrypoint-initdb.d
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_ADMIN_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+
+    
+  migrations:
+    image: migrate/migrate:v4.19.1
+      
+    restart: "no"
+
+    volumes:
+      - ./migrations:/migrations:ro
+
+    command:
+      - "-path=/migrations"
+      - "-database=${DATABASE_URL_MIGRATOR_DOCKER}"
+      - "up"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
